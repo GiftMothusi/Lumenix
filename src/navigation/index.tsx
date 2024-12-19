@@ -14,7 +14,7 @@ const AuthNavigator = () => (
 );
 
 export const RootNavigator = () => {
-  const isAuthenticated = false;
+//   const isAuthenticated = false;
 
   return (
     <NavigationContainer>
