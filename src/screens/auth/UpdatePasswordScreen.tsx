@@ -25,7 +25,7 @@ const UpdatePasswordScreen: React.FC<Props> = ({ navigation }) => {
       // Handle password mismatch
       return;
     }
-    
+
     setLoading(true);
     try {
       // TODO: Implement password update logic using authAPI
@@ -45,15 +45,15 @@ const UpdatePasswordScreen: React.FC<Props> = ({ navigation }) => {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.formContainer}>
           <Text style={styles.title}>Update Password</Text>
-          
-          <TextInput
+
+         <TextInput
             style={styles.input}
             placeholder="Current Password"
             value={currentPassword}
             onChangeText={setCurrentPassword}
             secureTextEntry
           />
-          
+
           <TextInput
             style={styles.input}
             placeholder="New Password"

@@ -17,4 +17,5 @@ export type AuthStackParamList = {
     Comments: { postId: string };
     Settings: undefined;
     UserProfile: { userId: string };
+    UpdatePassword: undefined;
 };
