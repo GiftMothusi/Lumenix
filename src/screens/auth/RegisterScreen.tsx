@@ -11,20 +11,62 @@ import {
 } from 'react-native';
 import { StackScreenProps } from '@react-navigation/stack';
 import { AuthStackParamList } from '../../types/navigation';
+import { authAPI } from '../../services/auth/auth';
+import { useAppDispatch } from '../../store/hooks';
+import { setUser, setToken } from '../../store/slices/authSlice';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { validateEmail, validatePassword } from '../../utils/validation';
 
 type Props = StackScreenProps<AuthStackParamList, 'Register'>;
 
 const RegisterScreen: React.FC<Props> = ({ navigation }) => {
+  const dispatch = useAppDispatch();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
 
   const handleRegister = async () => {
-    setLoading(true);
-    // TODO: Implement registration logic
-    setLoading(false);
+
+    if(!username.trim()){
+        setError('Username cannot be empty');
+        return;
+    }
+
+    if(!validateEmail(email)) {
+        setError('Invalid email address');
+        return;
+    }
+
+    if(!validatePassword(password)){
+        setError('Password should be at least 6 characters long');
+        return;
+    }
+
+    if(password !== confirmPassword){
+        setError('Passwords do not match');
+        return;
+    }
+
+    try{
+        setLoading(true);
+        setError('');
+
+        const response = await authAPI.register({ username, email, password});
+        await AsyncStorage.setItem('auth_token', response.token);
+
+
+        dispatch(setToken(response.token));
+        dispatch(setUser(response.user));
+
+    }catch(err){
+        setError('Failed to register. Please check your credentials.');
+    }finally{
+        setLoading(false);
+    }
   };
 
   return (
@@ -39,7 +81,10 @@ const RegisterScreen: React.FC<Props> = ({ navigation }) => {
             style={styles.input}
             placeholder="Username"
             value={username}
-            onChangeText={setUsername}
+            onChangeText={(text) => {
+                setUsername(text);
+                setError('');
+            }}
             autoCapitalize="none"
           />
 
@@ -47,7 +92,10 @@ const RegisterScreen: React.FC<Props> = ({ navigation }) => {
             style={styles.input}
             placeholder="Email"
             value={email}
-            onChangeText={setEmail}
+            onChangeText={(text) => {
+                setEmail(text);
+                setError('');
+            }}
             keyboardType="email-address"
             autoCapitalize="none"
           />
@@ -55,14 +103,20 @@ const RegisterScreen: React.FC<Props> = ({ navigation }) => {
             style={styles.input}
             placeholder="Password"
             value={password}
-            onChangeText={setPassword}
+            onChangeText={(text) => {
+                setPassword(text);
+                setError('');
+            }}
             secureTextEntry
           />
           <TextInput
             style={styles.input}
             placeholder="Confirm Password"
             value={confirmPassword}
-            onChangeText={setConfirmPassword}
+            onChangeText={(text) => {
+                setConfirmPassword(text);
+                setError('');
+            }}
             secureTextEntry
           />
 
@@ -82,6 +136,11 @@ const RegisterScreen: React.FC<Props> = ({ navigation }) => {
               <Text style={styles.loginLink}>Sign In</Text>
             </TouchableOpacity>
           </View>
+          {error &&
+            <Text style={styles.errorText}>
+                {error}
+            </Text>
+          }
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -142,6 +201,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#007AFF',
     fontWeight: '600',
+  },
+  errorText: {
+    color: '#ff0000',
+    textAlign: 'center',
+    margin: 10,
   },
 });
 
