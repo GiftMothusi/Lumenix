@@ -9,6 +9,7 @@ import { store } from '../store';
 import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
 import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
+import UpdatePasswordScreen from '../screens/auth/UpdatePasswordScreen';
 
 const RootStack = createStackNavigator<RootStackParamList>();
 const AuthStack = createStackNavigator<AuthStackParamList>();
@@ -28,6 +29,7 @@ export const RootNavigator = () => {
       <NavigationContainer>
         <RootStack.Navigator screenOptions={{ headerShown: false }}>
           <RootStack.Screen name="Auth" component={AuthNavigator} />
+          <RootStack.Screen name="UpdatePassword" component={UpdatePasswordScreen} />
         </RootStack.Navigator>
       </NavigationContainer>
     </Provider>
