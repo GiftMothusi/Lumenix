@@ -11,18 +11,48 @@ import {
 } from 'react-native';
 import { StackScreenProps } from '@react-navigation/stack';
 import { AuthStackParamList } from '../../types/navigation';
+import { authAPI } from '../../services/auth/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { validateEmail, validatePassword } from '../../utils/validation';
+import { useAppDispatch } from '../../store/hooks';
+import { setUser, setToken } from '../../store/slices/authSlice';
 
 type Props = StackScreenProps<AuthStackParamList, 'Login'>;
 
 const LoginScreen: React.FC<Props> = ({ navigation }) => {
+  const dispatch = useAppDispatch();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
 
   const handleLogin = async () => {
-    setLoading(true);
-    // TODO: Implement login logic
-    setLoading(false);
+
+    if(!validateEmail(email)){
+        setError('Invalid email address');
+        return;
+    }
+
+    if(!validatePassword(password)){
+        setError('Password should be at least 6 characters long');
+        return;
+    }
+
+    try{
+        setLoading(true);
+        setError('');
+
+        const response = await authAPI.login({email, password});
+        await AsyncStorage.setItem('auth_token', response.token);
+
+        dispatch(setToken(response.token));
+        dispatch(setUser(response.user));
+    }catch(err){
+        setError('Failed to login. Please check your credentials.');
+    }finally{
+        setLoading(false);
+    }
   };
 
   return (
@@ -37,7 +67,10 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
             style={styles.input}
             placeholder="Email"
             value={email}
-            onChangeText={setEmail}
+            onChangeText={(text) => {
+                setEmail(text);
+                setError('');
+            }}
             keyboardType="email-address"
             autoCapitalize="none"
           />
@@ -45,7 +78,10 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
             style={styles.input}
             placeholder="Password"
             value={password}
-            onChangeText={setPassword}
+            onChangeText={(text) => {
+                setPassword(text);
+                setError('');
+            }}
             secureTextEntry
           />
           <TouchableOpacity
@@ -57,6 +93,13 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
               {loading ? 'Logging in...' : 'Login'}
             </Text>
           </TouchableOpacity>
+
+          {error && (
+            <Text style={styles.errorText}>
+                {error}
+            </Text>
+            )
+          }
 
           <TouchableOpacity
             onPress={() => navigation.navigate('ForgotPassword')}
@@ -139,6 +182,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#007AFF',
     fontWeight: '600',
+  },
+  errorText: {
+    color: '#ff0000',
+    textAlign: 'center',
+    margin: 10,
   },
 });
 
