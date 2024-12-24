@@ -2,6 +2,7 @@ import { apiClient } from '../api/client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { store } from '../../store';
 import { setUser, setToken, logout } from '../../store/slices/authSlice';
+import auth from '@react-native-firebase/auth';
 
 // Types
 export interface LoginCredentials {
@@ -63,14 +64,13 @@ const checkRateLimit = (key: string): boolean => {
 };
 
 export const authAPI = {
-    login: async (credentials: LoginCredentials): Promise<AuthResponse> => {
-        const key = `login:${credentials.email}`;
-        if (!checkRateLimit(key)) {
-            throw new Error('Too many login attempts. Please try again later.');
-        }
-
+    // New method for Firebase token authentication
+    loginWithFirebase: async (firebaseToken: string): Promise<AuthResponse> => {
         try {
-            const response = await apiClient.post<AuthResponse>('/auth/login', credentials);
+            const response = await apiClient.post<AuthResponse>('/auth/firebase-login', {
+                firebaseToken,
+            });
+
             const { token, refreshToken, user } = response.data;
 
             // Store tokens
@@ -86,7 +86,36 @@ export const authAPI = {
             return response.data;
         } catch (error: any) {
             if (error.response?.status === 401) {
+                throw new Error('Firebase authentication failed');
+            }
+            throw error;
+        }
+    },
+
+    login: async (credentials: LoginCredentials): Promise<AuthResponse> => {
+        const key = `login:${credentials.email}`;
+        if (!checkRateLimit(key)) {
+            throw new Error('Too many login attempts. Please try again later.');
+        }
+
+        try {
+            // First authenticate with Firebase
+            const userCredential = await auth().signInWithEmailAndPassword(
+                credentials.email,
+                credentials.password
+            );
+
+            // Get the token
+            const firebaseToken = await userCredential.user.getIdToken();
+
+            // Then authenticate with our backend using the token
+            return await authAPI.loginWithFirebase(firebaseToken);
+        } catch (error: any) {
+            if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
                 throw new Error('Invalid credentials');
+            }
+            if (error.code === 'auth/too-many-requests') {
+                throw new Error('Too many login attempts. Please try again later.');
             }
             throw error;
         }
@@ -99,6 +128,10 @@ export const authAPI = {
         }
 
         try {
+            // First create Firebase user
+            await auth().createUserWithEmailAndPassword(data.email, data.password);
+
+            // Then create user in our backend and get tokens
             const response = await apiClient.post<AuthResponse>('/auth/register', data);
             const { token, refreshToken, user } = response.data;
 
@@ -114,7 +147,7 @@ export const authAPI = {
 
             return response.data;
         } catch (error: any) {
-            if (error.response?.status === 409) {
+            if (error.code === 'auth/email-already-in-use') {
                 throw new Error('Email already registered');
             }
             throw error;
@@ -123,11 +156,13 @@ export const authAPI = {
 
     logout: async () => {
         try {
+            // Sign out from Firebase
+            await auth().signOut();
+
             // Call logout endpoint to invalidate token on server
             await apiClient.post('/auth/logout');
         } catch (error) {
-            // Continue with local logout even if server request fails
-            console.error('Error during server logout:', error);
+            console.error('Error during logout:', error);
         } finally {
             // Clear local storage
             await AsyncStorage.multiRemove(['auth_token', 'refresh_token']);
@@ -146,8 +181,24 @@ export const authAPI = {
     },
 
     updatePassword: async (data: UpdatePasswordData): Promise<void> => {
-        const response = await apiClient.post('/auth/update-password', data);
-        return response.data;
+        try {
+            const user = auth().currentUser;
+            if (!user) {
+                throw new Error('No authenticated user found');
+            }
+
+            // Update password in Firebase
+            await user.updatePassword(data.newPassword);
+
+            // Update password in our backend
+            const response = await apiClient.post('/auth/update-password', data);
+            return response.data;
+        } catch (error: any) {
+            if (error.code === 'auth/requires-recent-login') {
+                throw new Error('Please log in again before updating your password');
+            }
+            throw error;
+        }
     },
 
     forgotPassword: async (email: string): Promise<void> => {
@@ -156,8 +207,20 @@ export const authAPI = {
             throw new Error('Too many password reset attempts. Please try again later.');
         }
 
-        const response = await apiClient.post('/auth/forgot-password', { email });
-        return response.data;
+        try {
+            // Send password reset email through Firebase
+            await auth().sendPasswordResetEmail(email);
+
+            // Notify our backend
+            const response = await apiClient.post('/auth/forgot-password', { email });
+            return response.data;
+        } catch (error: any) {
+            if (error.code === 'auth/user-not-found') {
+                // Don't reveal if email exists for security
+                return;
+            }
+            throw error;
+        }
     },
 
     resetPassword: async (token: string, newPassword: string): Promise<void> => {
