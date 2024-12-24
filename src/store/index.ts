@@ -9,7 +9,10 @@ export const store = configureStore({
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
-      serializableCheck: false,
+      serializableCheck: {
+        // Ignore Firebase auth actions in serializable check
+        ignoredActions: ['auth/setUser', 'auth/setToken'],
+      },
     }),
 });
 

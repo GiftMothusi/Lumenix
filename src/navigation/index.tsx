@@ -8,14 +8,16 @@ import { store } from '../store';
 import { navigationRef } from './navigationService';
 import { setToken } from '../store/slices/authSlice';
 
-// Auth Screen
+// Import Firebase
+import auth from '@react-native-firebase/auth';
+
+// Import your existing screens
 import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
 import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
 import UpdatePasswordScreen from '../screens/auth/UpdatePasswordScreen';
 import HomeScreen from '../screens/main/HomeScreen';
 import ProfileScreen from '../screens/main/ProfileScreen';
-
 
 import { useAppSelector, useAppDispatch } from '../store/hooks';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -24,7 +26,7 @@ const RootStack = createStackNavigator<RootStackParamList>();
 const AuthStack = createStackNavigator<AuthStackParamList>();
 const MainTab = createBottomTabNavigator<MainTabParamList>();
 
-
+// Your existing navigator components remain the same
 const AuthNavigator = () => (
   <AuthStack.Navigator screenOptions={{ headerShown: false }}>
     <AuthStack.Screen name="Login" component={LoginScreen} />
@@ -33,47 +35,42 @@ const AuthNavigator = () => (
   </AuthStack.Navigator>
 );
 
-// Main app navigator
 const MainTabNavigator = () => (
-    <MainTab.Navigator>
-      <MainTab.Screen name="Home" component={HomeScreen} />
-      <MainTab.Screen name="Profile" component={ProfileScreen} />
-      {/* Add other main app screens */}
-    </MainTab.Navigator>
-  );
+  <MainTab.Navigator>
+    <MainTab.Screen name="Home" component={HomeScreen} />
+    <MainTab.Screen name="Profile" component={ProfileScreen} />
+  </MainTab.Navigator>
+);
 
-// Root component with Redux Provider
+// Modified Root component with Firebase auth state handling
 export const RootNavigator = () => {
   const dispatch = useAppDispatch();
   const { token } = useAppSelector(state => state.auth);
 
   useEffect(() => {
-    const checkAuth = async () => {
+    // Set up Firebase auth state listener
+    const unsubscribe = auth().onAuthStateChanged(async (user) => {
+      if (user) {
+        // Get the token when user is authenticated
+        const token = await user.getIdToken();
+        await AsyncStorage.setItem('auth_token', token);
+        dispatch(setToken(token));
+      } else {
+        await AsyncStorage.removeItem('auth_token');
+        dispatch(setToken(null));
+      }
+    });
 
-        try{
-            const storedToken = await AsyncStorage.getItem('auth_token');
-            if(storedToken){
-                dispatch(setToken(storedToken));
-                //TODO: verify token with my API
-            }
-        }catch(err){
-            console.error('Failed to retrieve token from AsyncStorage:', err);
-            await AsyncStorage.removeItem('auth_token');
-            dispatch(setToken(null));
-        }
-    };
-    checkAuth();
-  },[dispatch]);
+    return unsubscribe;
+  }, [dispatch]);
 
   return (
     <Provider store={store}>
       <NavigationContainer ref={navigationRef}>
         <RootStack.Navigator screenOptions={{ headerShown: false }}>
-        {!token ? (
-            // Auth flows when user is not logged in
+          {!token ? (
             <RootStack.Screen name="Auth" component={AuthNavigator} />
           ) : (
-            // Main app flows when user is logged in
             <>
               <RootStack.Screen name="MainApp" component={MainTabNavigator} />
               <RootStack.Screen name="UpdatePassword" component={UpdatePasswordScreen} />
