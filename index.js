@@ -1,6 +1,8 @@
 /**
  * @format
  */
+import '@react-native-firebase/app';
+import '@react-native-firebase/auth';
 
 import {AppRegistry} from 'react-native';
 import App from './App';
