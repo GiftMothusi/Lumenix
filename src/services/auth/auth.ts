@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { store } from '../../store';
 import { setUser, setToken, logout } from '../../store/slices/authSlice';
 import auth from '@react-native-firebase/auth';
+import { tokenManager } from './tokenManager';
 
 // Types
 export interface LoginCredentials {
@@ -63,35 +64,35 @@ const checkRateLimit = (key: string): boolean => {
     return true;
 };
 
+// Helper function to store auth data
+const storeAuthData = async (response: AuthResponse) => {
+    await AsyncStorage.multiSet([
+        ['auth_token', response.token],
+        ['refresh_token', response.refreshToken],
+    ]);
+    store.dispatch(setToken(response.token));
+    store.dispatch(setUser(response.user));
+};
+
 export const authAPI = {
-    // New method for Firebase token authentication
+    // Firebase token authentication
     loginWithFirebase: async (firebaseToken: string): Promise<AuthResponse> => {
         try {
             const response = await apiClient.post<AuthResponse>('/auth/firebase-login', {
                 firebaseToken,
             });
 
-            const { token, refreshToken, user } = response.data;
-
-            // Store tokens
-            await AsyncStorage.multiSet([
-                ['auth_token', token],
-                ['refresh_token', refreshToken],
-            ]);
-
-            // Update Redux state
-            store.dispatch(setToken(token));
-            store.dispatch(setUser(user));
-
+            await storeAuthData(response.data);
             return response.data;
         } catch (error: any) {
             if (error.response?.status === 401) {
-                throw new Error('Firebase authentication failed');
+                throw new Error('Authentication failed. Please try again.');
             }
-            throw error;
+            throw new Error('Server error. Please try again later.');
         }
     },
 
+    // Login with email/password
     login: async (credentials: LoginCredentials): Promise<AuthResponse> => {
         const key = `login:${credentials.email}`;
         if (!checkRateLimit(key)) {
@@ -105,22 +106,31 @@ export const authAPI = {
                 credentials.password
             );
 
-            // Get the token
+            // Get the Firebase token
             const firebaseToken = await userCredential.user.getIdToken();
 
-            // Then authenticate with our backend using the token
-            return await authAPI.loginWithFirebase(firebaseToken);
+            // Authenticate with backend
+            const response = await authAPI.loginWithFirebase(firebaseToken);
+
+            // Store authentication data
+            await storeAuthData(response);
+
+            return response;
         } catch (error: any) {
             if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
-                throw new Error('Invalid credentials');
+                throw new Error('Invalid email or password');
             }
             if (error.code === 'auth/too-many-requests') {
                 throw new Error('Too many login attempts. Please try again later.');
             }
-            throw error;
+            if (error.code === 'auth/network-request-failed') {
+                throw new Error('Network error. Please check your connection.');
+            }
+            throw new Error('Login failed. Please try again.');
         }
     },
 
+    // Register new user
     register: async (data: RegisterData): Promise<AuthResponse> => {
         const key = `register:${data.email}`;
         if (!checkRateLimit(key)) {
@@ -128,58 +138,91 @@ export const authAPI = {
         }
 
         try {
-            // First create Firebase user
-            await auth().createUserWithEmailAndPassword(data.email, data.password);
+            // Create Firebase user
+            const userCredential = await auth().createUserWithEmailAndPassword(
+                data.email,
+                data.password
+            );
 
-            // Then create user in our backend and get tokens
-            const response = await apiClient.post<AuthResponse>('/auth/register', data);
-            const { token, refreshToken, user } = response.data;
+            // Get Firebase token
+            const firebaseToken = await userCredential.user.getIdToken();
 
-            // Store tokens
-            await AsyncStorage.multiSet([
-                ['auth_token', token],
-                ['refresh_token', refreshToken],
-            ]);
+            // Register with backend
+            const response = await apiClient.post<AuthResponse>('/auth/register', {
+                ...data,
+                firebaseToken,
+            });
 
-            // Update Redux state
-            store.dispatch(setToken(token));
-            store.dispatch(setUser(user));
+            // Store authentication data
+            await storeAuthData(response.data);
 
             return response.data;
         } catch (error: any) {
             if (error.code === 'auth/email-already-in-use') {
-                throw new Error('Email already registered');
+                throw new Error('Email is already registered');
             }
-            throw error;
+            if (error.code === 'auth/invalid-email') {
+                throw new Error('Invalid email address');
+            }
+            if (error.code === 'auth/weak-password') {
+                throw new Error('Password is too weak');
+            }
+            if (error.code === 'auth/network-request-failed') {
+                throw new Error('Network error. Please check your connection.');
+            }
+            throw new Error('Registration failed. Please try again.');
         }
     },
 
+    // Logout
     logout: async () => {
         try {
             // Sign out from Firebase
             await auth().signOut();
 
-            // Call logout endpoint to invalidate token on server
+            // Call logout endpoint to invalidate token
             await apiClient.post('/auth/logout');
-        } catch (error) {
-            console.error('Error during logout:', error);
-        } finally {
+
             // Clear local storage
             await AsyncStorage.multiRemove(['auth_token', 'refresh_token']);
+
             // Update Redux state
+            store.dispatch(logout());
+        } catch (error) {
+            console.error('Error during logout:', error);
+            // Force logout even if server call fails
+            await AsyncStorage.multiRemove(['auth_token', 'refresh_token']);
             store.dispatch(logout());
         }
     },
 
+    // Verify token
     verifyToken: async (): Promise<boolean> => {
         try {
-            const response = await apiClient.post<{ valid: boolean }>('/auth/verify-token');
-            return response.data.valid;
+            const token = await AsyncStorage.getItem('auth_token');
+            if (!token){
+                return false;
+            }
+
+            // Check token validity
+            const isValid = await tokenManager.validateToken(token);
+            if (!isValid) {
+                const refreshToken = await AsyncStorage.getItem('refresh_token');
+                if (!refreshToken){
+                    return false;
+                }
+
+                // Attempt to refresh token
+                await tokenManager.getNewToken(refreshToken);
+            }
+
+            return true;
         } catch (error) {
             return false;
         }
     },
 
+    // Update password
     updatePassword: async (data: UpdatePasswordData): Promise<void> => {
         try {
             const user = auth().currentUser;
@@ -190,17 +233,20 @@ export const authAPI = {
             // Update password in Firebase
             await user.updatePassword(data.newPassword);
 
-            // Update password in our backend
-            const response = await apiClient.post('/auth/update-password', data);
-            return response.data;
+            // Update password in backend
+            await apiClient.post('/auth/update-password', data);
         } catch (error: any) {
             if (error.code === 'auth/requires-recent-login') {
                 throw new Error('Please log in again before updating your password');
             }
-            throw error;
+            if (error.code === 'auth/weak-password') {
+                throw new Error('Password is too weak');
+            }
+            throw new Error('Failed to update password. Please try again.');
         }
     },
 
+    // Forgot password
     forgotPassword: async (email: string): Promise<void> => {
         const key = `forgotPassword:${email}`;
         if (!checkRateLimit(key)) {
@@ -208,35 +254,20 @@ export const authAPI = {
         }
 
         try {
-            // Send password reset email through Firebase
+            // Send reset email through Firebase
             await auth().sendPasswordResetEmail(email);
 
-            // Notify our backend
-            const response = await apiClient.post('/auth/forgot-password', { email });
-            return response.data;
+            // Notify backend
+            await apiClient.post('/auth/forgot-password', { email });
         } catch (error: any) {
             if (error.code === 'auth/user-not-found') {
                 // Don't reveal if email exists for security
                 return;
             }
-            throw error;
-        }
-    },
-
-    resetPassword: async (token: string, newPassword: string): Promise<void> => {
-        const response = await apiClient.post('/auth/reset-password', {
-            token,
-            newPassword,
-        });
-        return response.data;
-    },
-
-    validateResetToken: async (token: string): Promise<boolean> => {
-        try {
-            const response = await apiClient.post<{ valid: boolean }>('/auth/validate-reset-token', { token });
-            return response.data.valid;
-        } catch (error) {
-            return false;
+            if (error.code === 'auth/invalid-email') {
+                throw new Error('Invalid email address');
+            }
+            throw new Error('Failed to send password reset email. Please try again.');
         }
     },
 };

@@ -4,6 +4,7 @@ import { store } from '../../store';
 import { logout } from '../../store/slices/authSlice';
 import { NavigationService } from '../../navigation/navigationService';
 import config from '../../config';
+import auth from '@react-native-firebase/auth';
 
 interface TokenData {
     exp: number;
@@ -34,13 +35,31 @@ export class TokenManager {
         // Create new refresh promise with proper error handling
         this.refreshPromise = (async () => {
             try {
+                // First, check Firebase token
+                const currentUser = auth().currentUser;
+                if (!currentUser) {
+                    throw new Error('No authenticated user');
+                }
+
+                // Get new Firebase token
+                const firebaseToken = await currentUser.getIdToken(true);
+
+                // Exchange Firebase token for new app tokens
                 const response = await axios.post(
                     `${config.apiUrl}/auth/refresh-token`,
-                    { refreshToken }
+                    {
+                        refreshToken,
+                        firebaseToken,
+                    }
                 );
 
-                const newToken = response.data.token;
-                await this.storage.setItem('auth_token', newToken);
+                const { token: newToken, refreshToken: newRefreshToken } = response.data;
+
+                // Store new tokens
+                await this.storage.multiSet([
+                    ['auth_token', newToken],
+                    ['refresh_token', newRefreshToken],
+                ]);
 
                 return newToken;
             } catch (error) {
@@ -60,9 +79,21 @@ export class TokenManager {
             const tokenData = this.parseToken(token);
             const expirationTime = tokenData.exp * 1000; // Convert to milliseconds
             const currentTime = Date.now();
+            const refreshThreshold = config.authConfig.refreshThreshold;
 
-            // Check if token is expired or close to expiring (within refresh threshold)
-            return currentTime < (expirationTime - config.authConfig.refreshThreshold);
+            // Check if token is expired or close to expiring
+            if (currentTime >= (expirationTime - refreshThreshold)) {
+                // Token needs refresh
+                return false;
+            }
+
+            // Also verify with Firebase
+            const currentUser = auth().currentUser;
+            if (!currentUser) {
+                return false;
+            }
+
+            return true;
         } catch {
             return false;
         }
@@ -71,7 +102,7 @@ export class TokenManager {
     private parseToken(token: string): TokenData {
         try {
             const payload = token.split('.')[1];
-            const decoded = atob(payload);
+            const decoded = Buffer.from(payload, 'base64').toString('utf8');
             return JSON.parse(decoded);
         } catch (error) {
             throw new Error('Invalid token format');
@@ -80,8 +111,16 @@ export class TokenManager {
 
     private async handleTokenError(): Promise<void> {
         try {
+            // Sign out from Firebase
+            await auth().signOut();
+
+            // Clear stored tokens
             await this.storage.multiRemove(['auth_token', 'refresh_token']);
+
+            // Update Redux state
             store.dispatch(logout());
+
+            // Navigate to auth
             NavigationService.navigateToAuth();
         } catch (error) {
             console.error('Error during token error handling:', error);

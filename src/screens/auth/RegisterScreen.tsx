@@ -8,19 +8,17 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { StackScreenProps } from '@react-navigation/stack';
 import { AuthStackParamList } from '../../types/navigation';
 import { authAPI } from '../../services/auth/auth';
-import { useAppDispatch } from '../../store/hooks';
-import { setUser, setToken } from '../../store/slices/authSlice';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { validateEmail, validatePassword } from '../../utils/validation';
+import { NavigationService } from '../../navigation/navigationService';
 
 type Props = StackScreenProps<AuthStackParamList, 'Register'>;
 
 const RegisterScreen: React.FC<Props> = ({ navigation }) => {
-  const dispatch = useAppDispatch();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -28,44 +26,54 @@ const RegisterScreen: React.FC<Props> = ({ navigation }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-
   const handleRegister = async () => {
-
-    if(!username.trim()){
-        setError('Username cannot be empty');
-        return;
+    // Form validation
+    if (!username.trim()) {
+      setError('Username is required');
+      return;
     }
 
-    if(!validateEmail(email)) {
-        setError('Invalid email address');
-        return;
+    if (username.length < 3) {
+      setError('Username must be at least 3 characters long');
+      return;
     }
 
-    if(!validatePassword(password)){
-        setError('Password should be at least 6 characters long');
-        return;
+    if (!email.trim()) {
+      setError('Email is required');
+      return;
     }
 
-    if(password !== confirmPassword){
-        setError('Passwords do not match');
-        return;
+    if (!validateEmail(email)) {
+      setError('Invalid email address');
+      return;
     }
 
-    try{
-        setLoading(true);
-        setError('');
+    if (!password.trim()) {
+      setError('Password is required');
+      return;
+    }
 
-        const response = await authAPI.register({ username, email, password});
-        await AsyncStorage.setItem('auth_token', response.token);
+    if (!validatePassword(password)) {
+      setError('Password must be at least 6 characters long');
+      return;
+    }
 
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
 
-        dispatch(setToken(response.token));
-        dispatch(setUser(response.user));
+    try {
+      setLoading(true);
+      setError('');
 
-    }catch(err){
-        setError('Failed to register. Please check your credentials.');
-    }finally{
-        setLoading(false);
+      await authAPI.register({ username, email, password });
+      // Navigate to main app on successful registration
+      NavigationService.navigateToMainApp();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Registration failed. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -74,73 +82,100 @@ const RegisterScreen: React.FC<Props> = ({ navigation }) => {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.formContainer}>
           <Text style={styles.title}>Create Account</Text>
+
+          {/* Username Input */}
           <TextInput
-            style={styles.input}
+            style={[styles.input, error && username === '' && styles.inputError]}
             placeholder="Username"
             value={username}
             onChangeText={(text) => {
-                setUsername(text);
-                setError('');
+              setUsername(text);
+              setError('');
             }}
             autoCapitalize="none"
+            autoCorrect={false}
+            editable={!loading}
+            placeholderTextColor="#666"
           />
 
+          {/* Email Input */}
           <TextInput
-            style={styles.input}
+            style={[styles.input, error && email === '' && styles.inputError]}
             placeholder="Email"
             value={email}
             onChangeText={(text) => {
-                setEmail(text);
-                setError('');
+              setEmail(text);
+              setError('');
             }}
             keyboardType="email-address"
             autoCapitalize="none"
+            autoCorrect={false}
+            editable={!loading}
+            placeholderTextColor="#666"
           />
+
+          {/* Password Input */}
           <TextInput
-            style={styles.input}
+            style={[styles.input, error && password === '' && styles.inputError]}
             placeholder="Password"
             value={password}
             onChangeText={(text) => {
-                setPassword(text);
-                setError('');
+              setPassword(text);
+              setError('');
             }}
             secureTextEntry
+            editable={!loading}
+            placeholderTextColor="#666"
           />
+
+          {/* Confirm Password Input */}
           <TextInput
-            style={styles.input}
+            style={[styles.input, error && confirmPassword === '' && styles.inputError]}
             placeholder="Confirm Password"
             value={confirmPassword}
             onChangeText={(text) => {
-                setConfirmPassword(text);
-                setError('');
+              setConfirmPassword(text);
+              setError('');
             }}
             secureTextEntry
+            editable={!loading}
+            placeholderTextColor="#666"
           />
 
+          {/* Error Message */}
+          {error ? (
+            <Text style={styles.errorText}>{error}</Text>
+          ) : null}
+
+          {/* Register Button */}
           <TouchableOpacity
-            style={styles.button}
+            style={[styles.button, loading && styles.buttonDisabled]}
             onPress={handleRegister}
             disabled={loading}
           >
-            <Text style={styles.buttonText}>
-              {loading ? 'Creating Account...' : 'Register'}
-            </Text>
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Create Account</Text>
+            )}
           </TouchableOpacity>
 
+          {/* Login Link */}
           <View style={styles.loginContainer}>
             <Text style={styles.loginText}>Already have an account? </Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Login')}>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Login')}
+              disabled={loading}
+            >
               <Text style={styles.loginLink}>Sign In</Text>
             </TouchableOpacity>
           </View>
-          {error &&
-            <Text style={styles.errorText}>
-                {error}
-            </Text>
-          }
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -165,6 +200,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 30,
     textAlign: 'center',
+    color: '#000',
   },
   input: {
     height: 50,
@@ -174,6 +210,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     marginBottom: 15,
     fontSize: 16,
+    backgroundColor: '#fff',
+    color: '#000',
+  },
+  inputError: {
+    borderColor: '#ff0000',
   },
   button: {
     backgroundColor: '#007AFF',
@@ -182,6 +223,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 15,
+  },
+  buttonDisabled: {
+    backgroundColor: '#ccc',
   },
   buttonText: {
     color: '#fff',
@@ -205,7 +249,7 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#ff0000',
     textAlign: 'center',
-    margin: 10,
+    marginBottom: 15,
   },
 });
 

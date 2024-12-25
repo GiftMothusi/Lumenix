@@ -8,50 +8,83 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { StackScreenProps } from '@react-navigation/stack';
 import { AuthStackParamList } from '../../types/navigation';
 import { authAPI } from '../../services/auth/auth';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { validateEmail, validatePassword } from '../../utils/validation';
 import { useAppDispatch } from '../../store/hooks';
-import { setUser, setToken } from '../../store/slices/authSlice';
+import { NavigationService } from '../../navigation/navigationService';
+import {
+  loginSuccess,
+  setError as setAuthError,
+  setLoading as setAuthLoading,
+} from '../../store/slices/authSlice';
 
+// Define the props type using StackScreenProps for type-safe navigation
 type Props = StackScreenProps<AuthStackParamList, 'Login'>;
 
 const LoginScreen: React.FC<Props> = ({ navigation }) => {
+  // Initialize Redux dispatch
   const dispatch = useAppDispatch();
+
+  // Local state management
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-
+  // Handle the login process
   const handleLogin = async () => {
-
-    if(!validateEmail(email)){
-        setError('Invalid email address');
-        return;
+    // Form validation
+    if (!email.trim()) {
+      setError('Email is required');
+      return;
     }
 
-    if(!validatePassword(password)){
-        setError('Password should be at least 6 characters long');
-        return;
+    if (!validateEmail(email)) {
+      setError('Invalid email address');
+      return;
     }
 
-    try{
-        setLoading(true);
-        setError('');
+    if (!password.trim()) {
+      setError('Password is required');
+      return;
+    }
 
-        const response = await authAPI.login({email, password});
-        await AsyncStorage.setItem('auth_token', response.token);
+    if (!validatePassword(password)) {
+      setError('Password should be at least 6 characters long');
+      return;
+    }
 
-        dispatch(setToken(response.token));
-        dispatch(setUser(response.user));
-    }catch(err){
-        setError('Failed to login. Please check your credentials.');
-    }finally{
-        setLoading(false);
+    try {
+      // Set loading states both locally and in Redux
+      setLoading(true);
+      setError('');
+      dispatch(setAuthLoading(true));
+      dispatch(setAuthError(null));
+
+      // Attempt login through the auth service
+      const response = await authAPI.login({ email, password });
+
+      // Update global state with successful login data
+      dispatch(loginSuccess({
+        user: response.user,
+        token: response.token,
+      }));
+
+      // Navigate to main app on successful login
+      NavigationService.navigateToMainApp();
+    } catch (err) {
+      // Handle errors and update both local and global error states
+      const errorMessage = err instanceof Error ? err.message : 'Failed to login. Please try again.';
+      setError(errorMessage);
+      dispatch(setAuthError(errorMessage));
+    } finally {
+      // Clear loading states regardless of outcome
+      setLoading(false);
+      dispatch(setAuthLoading(false));
     }
   };
 
@@ -60,57 +93,84 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.formContainer}>
           <Text style={styles.title}>Welcome Back</Text>
+
+          {/* Email Input */}
           <TextInput
-            style={styles.input}
+            style={[styles.input, error && email === '' && styles.inputError]}
             placeholder="Email"
             value={email}
             onChangeText={(text) => {
-                setEmail(text);
-                setError('');
+              setEmail(text);
+              setError(''); // Clear error when user starts typing
             }}
             keyboardType="email-address"
             autoCapitalize="none"
+            autoCorrect={false}
+            editable={!loading}
+            placeholderTextColor="#666"
+            testID="login-email-input"
           />
+
+          {/* Password Input */}
           <TextInput
-            style={styles.input}
+            style={[styles.input, error && password === '' && styles.inputError]}
             placeholder="Password"
             value={password}
             onChangeText={(text) => {
-                setPassword(text);
-                setError('');
+              setPassword(text);
+              setError(''); // Clear error when user starts typing
             }}
             secureTextEntry
+            editable={!loading}
+            placeholderTextColor="#666"
+            testID="login-password-input"
           />
+
+          {/* Error Message Display */}
+          {error ? (
+            <Text style={styles.errorText} testID="login-error-message">
+              {error}
+            </Text>
+          ) : null}
+
+          {/* Login Button */}
           <TouchableOpacity
-            style={styles.button}
+            style={[styles.button, loading && styles.buttonDisabled]}
             onPress={handleLogin}
             disabled={loading}
+            testID="login-submit-button"
           >
-            <Text style={styles.buttonText}>
-              {loading ? 'Logging in...' : 'Login'}
-            </Text>
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Login</Text>
+            )}
           </TouchableOpacity>
 
-          {error && (
-            <Text style={styles.errorText}>
-                {error}
-            </Text>
-            )
-          }
-
+          {/* Forgot Password Link */}
           <TouchableOpacity
             onPress={() => navigation.navigate('ForgotPassword')}
             style={styles.linkButton}
+            disabled={loading}
+            testID="forgot-password-link"
           >
             <Text style={styles.linkText}>Forgot Password?</Text>
           </TouchableOpacity>
 
+          {/* Register Account Link */}
           <View style={styles.registerContainer}>
             <Text style={styles.registerText}>Don't have an account? </Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Register')}>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Register')}
+              disabled={loading}
+              testID="register-link"
+            >
               <Text style={styles.registerLink}>Sign Up</Text>
             </TouchableOpacity>
           </View>
@@ -120,6 +180,7 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
   );
 };
 
+// Styles for the component
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -138,6 +199,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 30,
     textAlign: 'center',
+    color: '#000',
   },
   input: {
     height: 50,
@@ -147,6 +209,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     marginBottom: 15,
     fontSize: 16,
+    backgroundColor: '#fff',
+    color: '#000',
+  },
+  inputError: {
+    borderColor: '#ff0000',
   },
   button: {
     backgroundColor: '#007AFF',
@@ -155,6 +222,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 15,
+  },
+  buttonDisabled: {
+    backgroundColor: '#ccc',
   },
   buttonText: {
     color: '#fff',
@@ -186,7 +256,7 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#ff0000',
     textAlign: 'center',
-    margin: 10,
+    marginBottom: 15,
   },
 });
 

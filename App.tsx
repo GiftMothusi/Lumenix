@@ -3,8 +3,7 @@ import { Provider } from 'react-redux';
 import { store } from './src/store';
 import { RootNavigator } from './src/navigation';
 import { authSynchronizer } from './src/services/auth/authSync';
-import { NavigationContainer } from '@react-navigation/native';
-import { navigationRef } from './src/navigation/navigationService';
+
 
 const App = () => {
     useEffect(() => {
@@ -27,9 +26,7 @@ const App = () => {
 
     return (
         <Provider store={store}>
-            <NavigationContainer ref={navigationRef}>
-                <RootNavigator />
-            </NavigationContainer>
+            <RootNavigator />
         </Provider>
     );
 };
